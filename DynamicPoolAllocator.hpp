@@ -3,8 +3,9 @@
 
 #include <cstddef>
 #include <cassert>
-#include "StdAllocator.hpp"
-#include "FixedPoolAllocator.hpp"
+#include "umpire/tpl/simpool/StdAllocator.hpp"
+#include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
+#include "umpire/strategy/AllocationStrategy.hpp"
 
 template <class MA, class IA = StdAllocator>
 class DynamicPoolAllocator
@@ -35,6 +36,9 @@ protected:
   // Minimum size for allocations
   std::size_t minBytes;
 
+  // Pointer to our allocator's allocation strategy
+  std::shared_ptr<umpire::strategy::AllocationStrategy> allocStrategy;
+
   // Search the list of free blocks and return a usable one if that exists, else NULL
   void findUsableBlock(struct Block *&best, struct Block *&prev, std::size_t size) {
     best = prev = NULL;
@@ -54,7 +58,7 @@ protected:
     void *data = NULL;
 
     // Allocate data
-    data = MA::allocate(sizeToAlloc);
+    data = MA::allocate(allocStrategy, sizeToAlloc);
     totalBytes += sizeToAlloc;
     assert(data);
 
@@ -148,7 +152,7 @@ protected:
     // Release the unused blocks
     while(freeBlocks) {
       assert(freeBlocks->isHead);
-      MA::deallocate(freeBlocks->data);
+      MA::deallocate(allocStrategy, freeBlocks->data);
       totalBytes -= freeBlocks->size;
       struct Block *curr = freeBlocks;
       freeBlocks = freeBlocks->next;
@@ -157,18 +161,16 @@ protected:
   }
 
 public:
-  static inline DynamicPoolAllocator &getInstance() {
-    static DynamicPoolAllocator instance;
-    return instance;
-  }
-
-  DynamicPoolAllocator(const std::size_t _minBytes = (1 << 8))
+  DynamicPoolAllocator(
+      const std::size_t _minBytes = (1 << 8), 
+      std::shared_ptr<umpire::strategy::AllocationStrategy> _strat = nullptr)
     : blockAllocator(),
       usedBlocks(NULL),
       freeBlocks(NULL),
       totalBytes(0),
       allocBytes(0),
-      minBytes(_minBytes) { }
+      minBytes(_minBytes),
+      allocStrategy(_strat) { }
 
   ~DynamicPoolAllocator() { freeAllBlocks(); }
 
@@ -228,7 +230,6 @@ public:
     for (struct Block *temp = usedBlocks; temp; temp = temp->next) nb++;
     return nb;
   }
-
 };
 
 #endif
