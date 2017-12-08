@@ -103,11 +103,14 @@ public:
         const int indexD = ptr - reinterpret_cast<T*>(curr->data);
         const int indexI = indexD / sizeof(unsigned int) / 8;
         const int indexB = indexD % ( sizeof(unsigned int) * 8 );
-#ifdef NDEBUG
-        if (!((curr->avail[indexI] >> indexB) & 1))
-          std::cerr << "Trying to deallocate an entry that was not marked as allocated"
-                    << std::endl;
-#endif
+        // TODO - The check below appears to be buggy.  I believe that the
+        // bit should be "0" if it was previously allocated.  The check seems
+        // to be checking for "1".
+//#ifdef DEBUG
+        //if (!((curr->avail[indexI] >> indexB) & 1))
+          //std::cerr << "Trying to deallocate an entry that was not marked as allocated"
+                    //<< std::endl;
+//#endif
         curr->avail[indexI] ^= 1 << indexB;
         curr->numAvail++;
         numBlocks--;
