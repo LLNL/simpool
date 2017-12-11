@@ -3,11 +3,12 @@
 
 #include <cstddef>
 #include <cassert>
+
 #include "umpire/tpl/simpool/StdAllocator.hpp"
 #include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
 #include "umpire/strategy/AllocationStrategy.hpp"
 
-template <class MA, class IA = StdAllocator>
+template <class IA = StdAllocator>
 class DynamicPoolAllocator
 {
 protected:
@@ -37,7 +38,7 @@ protected:
   std::size_t minBytes;
 
   // Pointer to our allocator's allocation strategy
-  std::shared_ptr<umpire::strategy::AllocationStrategy> allocStrategy;
+  std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
 
   // Search the list of free blocks and return a usable one if that exists, else NULL
   void findUsableBlock(struct Block *&best, struct Block *&prev, std::size_t size) {
@@ -58,7 +59,7 @@ protected:
     void *data = NULL;
 
     // Allocate data
-    data = MA::allocate(allocStrategy, sizeToAlloc);
+    data = allocator->allocate(sizeToAlloc);
     totalBytes += sizeToAlloc;
     assert(data);
 
@@ -152,7 +153,7 @@ protected:
     // Release the unused blocks
     while(freeBlocks) {
       assert(freeBlocks->isHead);
-      MA::deallocate(allocStrategy, freeBlocks->data);
+      allocator->deallocate(freeBlocks->data);
       totalBytes -= freeBlocks->size;
       struct Block *curr = freeBlocks;
       freeBlocks = freeBlocks->next;
@@ -162,15 +163,15 @@ protected:
 
 public:
   DynamicPoolAllocator(
-      const std::size_t _minBytes = (1 << 8), 
-      std::shared_ptr<umpire::strategy::AllocationStrategy> _strat = nullptr)
+      std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
+      const std::size_t _minBytes = (1 << 8))
     : blockAllocator(),
       usedBlocks(NULL),
       freeBlocks(NULL),
       totalBytes(0),
       allocBytes(0),
       minBytes(_minBytes),
-      allocStrategy(_strat) { }
+      allocator(strat) { }
 
   ~DynamicPoolAllocator() { freeAllBlocks(); }
 
