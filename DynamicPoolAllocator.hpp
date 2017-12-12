@@ -84,9 +84,10 @@ protected:
 
   void splitBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
     struct Block *next;
-    std::size_t alignedsize = (size + 0x10) & ~(std::size_t)0xF;  // 16-Byte alignment
+    const std::size_t AlignmentBoundary = 16;
+    std::size_t alignedsize = (size + (AlignmentBoundary-1)) & ~(AlignmentBoundary-1);
 
-    if ( curr->size == size || curr->size == alignedsize) {
+    if ( curr->size == size || curr->size == alignedsize ) {
       // Keep it
       next = curr->next;
     }
