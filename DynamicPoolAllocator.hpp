@@ -84,21 +84,23 @@ protected:
 
   void splitBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
     struct Block *next;
-    if ( curr->size == size ) {
+    std::size_t alignedsize = (size + 0x10) & ~(std::size_t)0xF;  // 16-Byte alignment
+
+    if ( curr->size == size || curr->size == alignedsize) {
       // Keep it
       next = curr->next;
     }
     else {
       // Split the block
-      std::size_t remaining = curr->size - size;
+      std::size_t remaining = curr->size - alignedsize;
       struct Block *newBlock = (struct Block *) blockAllocator.allocate();
       if (!newBlock) return;
-      newBlock->data = curr->data + size;
+      newBlock->data = curr->data + alignedsize;
       newBlock->size = remaining;
       newBlock->isHead = false;
       newBlock->next = curr->next;
       next = newBlock;
-      curr->size = size;
+      curr->size = alignedsize;
     }
 
     if (prev) prev->next = next;
