@@ -29,7 +29,7 @@ protected:
 
     p->data  = reinterpret_cast<unsigned char *>(p) + sizeof(struct Pool);
     p->avail = reinterpret_cast<unsigned int *>(p->data + numPerPool * sizeof(T));
-    for (int i = 0; i < NP; i++) p->avail[i] = -1;
+    for (int i = 0; i < NP; i++) p->avail[i] = (unsigned int)-1;
 
     *pnew = p;
   }
