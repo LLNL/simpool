@@ -12,6 +12,7 @@ target_link_libraries(umpire_tpl_simpool INTERFACE)
 
 install(TARGETS
   umpire_tpl_simpool
+  EXPORT umpire-targets
   RUNTIME DESTINATION lib
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
