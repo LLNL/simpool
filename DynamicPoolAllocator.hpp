@@ -7,6 +7,7 @@
 #include "umpire/tpl/simpool/StdAllocator.hpp"
 #include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
 #include "umpire/strategy/AllocationStrategy.hpp"
+#include "umpire/util/Macros.hpp"
 
 template <class IA = StdAllocator>
 class DynamicPoolAllocator
@@ -14,6 +15,7 @@ class DynamicPoolAllocator
 protected:
   struct Block
   {
+    char *control_data; // HACK to allow for initial block allocation to be different from sub-allocations
     char *data;
     std::size_t size;
     bool isHead;
@@ -36,6 +38,13 @@ protected:
 
   // Minimum size for allocations
   std::size_t minBytes;
+
+  // if totalBytes > usageThresholdFloor && (totalBytes-allocBytes)/totalBytes < minUsageThreshold
+  // then
+  //    give back all free blocks to system allocator
+  // endif
+  double minUsageThreshold;
+  std::size_t usageThresholdFloor;
 
   // Pointer to our allocator's allocation strategy
   std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
@@ -62,9 +71,11 @@ protected:
     const std::size_t sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
     curr = prev = NULL;
     void *data = NULL;
+    void *control_data; // Ptr to 64-byte header just prior to data
 
     // Allocate data
-    data = allocator->allocate(sizeToAlloc);
+    control_data = allocator->allocate(sizeToAlloc+64);
+    data = (void*)((char*)control_data + 64); // HACK: The data area that simpool uses for subsequent allocations begins here
     totalBytes += sizeToAlloc;
     assert(data);
 
@@ -77,6 +88,7 @@ protected:
     // Allocate the block
     curr = (struct Block *) blockAllocator.allocate();
     if (!curr) return;
+    curr->control_data = static_cast<char *>(control_data);
     curr->data = static_cast<char *>(data);
     curr->size = sizeToAlloc;
     curr->isHead = true;
@@ -151,33 +163,44 @@ protected:
     }
   }
 
+  void freeReleasedBlocks() {
+    // Release the unused blocks
+    UMPIRE_LOG(Debug, "Enter");
+    while(freeBlocks) {
+      assert(freeBlocks->isHead);
+      allocator->deallocate(freeBlocks->control_data);  // HACK - used to use data
+      totalBytes -= freeBlocks->size;
+      struct Block *curr = freeBlocks;
+      freeBlocks = freeBlocks->next;
+      blockAllocator.deallocate(curr);
+    }
+    UMPIRE_LOG(Debug, "Exit");
+  }
+
   void freeAllBlocks() {
     // Release the used blocks
     while(usedBlocks) {
       releaseBlock(usedBlocks, NULL);
     }
 
-    // Release the unused blocks
-    while(freeBlocks) {
-      assert(freeBlocks->isHead);
-      allocator->deallocate(freeBlocks->data);
-      totalBytes -= freeBlocks->size;
-      struct Block *curr = freeBlocks;
-      freeBlocks = freeBlocks->next;
-      blockAllocator.deallocate(curr);
-    }
+    freeReleasedBlocks();
   }
 
 public:
   DynamicPoolAllocator(
       std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
-      const std::size_t _minBytes = (1 << 8))
+      const std::size_t _minBytes = (1 << 8),
+      const float _min_usage_threshold = 0.5,
+      const std::size_t _usage_threshold_floor = 1024 * 1024 * 512
+      )
     : blockAllocator(),
       usedBlocks(NULL),
       freeBlocks(NULL),
       totalBytes(0),
       allocBytes(0),
       minBytes(_minBytes),
+      minUsageThreshold(_min_usage_threshold),
+      usageThresholdFloor(_usage_threshold_floor),
       allocator(strat) { }
 
   ~DynamicPoolAllocator() { freeAllBlocks(); }
@@ -219,6 +242,18 @@ public:
 
     // Release it
     releaseBlock(curr, prev);
+
+    std::size_t freeBytes = totalBytes - allocBytes;
+    double x = (double)freeBytes / (double)totalBytes;
+
+    if (totalBytes > usageThresholdFloor) {
+      UMPIRE_LOG(Debug, 
+          " " << freeBytes << "/" << totalBytes << "=" << x);
+    }
+
+    if (freeBytes > usageThresholdFloor && x > minUsageThreshold) {
+      freeReleasedBlocks();
+    }
   }
 
   std::size_t allocatedSize() const { return allocBytes; }
