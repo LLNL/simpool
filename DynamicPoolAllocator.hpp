@@ -3,6 +3,9 @@
 
 #include <cstddef>
 #include <cassert>
+#include <string>
+#include <iostream>
+#include <sstream>
 
 #include "umpire/tpl/simpool/StdAllocator.hpp"
 #include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
@@ -15,10 +18,8 @@ class DynamicPoolAllocator
 protected:
   struct Block
   {
-    char *control_data; // HACK to allow for initial block allocation to be different from sub-allocations
     char *data;
     std::size_t size;
-    bool isHead;
     Block *next;
   };
 
@@ -39,15 +40,28 @@ protected:
   // Minimum size for allocations
   std::size_t minBytes;
 
-  // if totalBytes > usageThresholdFloor && (totalBytes-allocBytes)/totalBytes < minUsageThreshold
-  // then
-  //    give back all free blocks to system allocator
-  // endif
-  double minUsageThreshold;
-  std::size_t usageThresholdFloor;
-
   // Pointer to our allocator's allocation strategy
   std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
+
+  void dumpBlocks(const std::stringstream& header) {
+    int i = 1;
+    for ( struct Block *iter = freeBlocks ; iter ; iter = iter->next ) {
+      std::cout 
+        << header.str()
+        << "\t" << i << " " << std::hex << iter->size << " : " 
+        << (void*)(&iter->data[0]) << " -- " << (void*)(&iter->data[iter->size]) << "\n";
+      ++i;
+    }
+
+    i = 1;
+    for ( struct Block *iter = usedBlocks ; iter ; iter = iter->next ) {
+      std::cout 
+        << header.str()
+        << "\t" << i << " " << std::hex << iter->size << " : " 
+        << (void*)(&iter->data[0]) << " -- " << (void*)(&iter->data[iter->size]) << "\n";
+      ++i;
+    }
+  }
 
   // Search the list of free blocks and return a usable one if that exists, else NULL
   void findUsableBlock(struct Block *&best, struct Block *&prev, std::size_t size) {
@@ -71,11 +85,9 @@ protected:
     const std::size_t sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
     curr = prev = NULL;
     void *data = NULL;
-    void *control_data; // Ptr to 64-byte header just prior to data
 
     // Allocate data
-    control_data = allocator->allocate(sizeToAlloc+64);
-    data = (void*)((char*)control_data + 64); // HACK: The data area that simpool uses for subsequent allocations begins here
+    data = allocator->allocate(sizeToAlloc);
     totalBytes += sizeToAlloc;
     assert(data);
 
@@ -88,10 +100,8 @@ protected:
     // Allocate the block
     curr = (struct Block *) blockAllocator.allocate();
     if (!curr) return;
-    curr->control_data = static_cast<char *>(control_data);
     curr->data = static_cast<char *>(data);
     curr->size = sizeToAlloc;
-    curr->isHead = true;
     curr->next = next;
 
     // Insert
@@ -114,7 +124,6 @@ protected:
       if (!newBlock) return;
       newBlock->data = curr->data + alignedsize;
       newBlock->size = remaining;
-      newBlock->isHead = false;
       newBlock->next = curr->next;
       next = newBlock;
       curr->size = alignedsize;
@@ -140,7 +149,7 @@ protected:
     struct Block *next = prev ? prev->next : freeBlocks;
 
     // Check if prev and curr can be merged
-    if ( prev && prev->data + prev->size == curr->data && !curr->isHead ) {
+    if ( prev && prev->data + prev->size == curr->data ) {
       prev->size = prev->size + curr->size;
       blockAllocator.deallocate(curr); // keep data
       curr = prev;
@@ -153,7 +162,7 @@ protected:
     }
 
     // Check if curr and next can be merged
-    if ( next && curr->data + curr->size == next->data && !next->isHead ) {
+    if ( next && curr->data + curr->size == next->data ) {
       curr->size = curr->size + next->size;
       curr->next = next->next;
       blockAllocator.deallocate(next); // keep data
@@ -163,18 +172,16 @@ protected:
     }
   }
 
+  // TODO: This function should instead release all originally allocated blocks
   void freeReleasedBlocks() {
     // Release the unused blocks
-    UMPIRE_LOG(Debug, "Enter");
     while(freeBlocks) {
-      assert(freeBlocks->isHead);
-      allocator->deallocate(freeBlocks->control_data);  // HACK - used to use data
+      allocator->deallocate(freeBlocks->data);
       totalBytes -= freeBlocks->size;
       struct Block *curr = freeBlocks;
       freeBlocks = freeBlocks->next;
       blockAllocator.deallocate(curr);
     }
-    UMPIRE_LOG(Debug, "Exit");
   }
 
   void freeAllBlocks() {
@@ -189,9 +196,7 @@ protected:
 public:
   DynamicPoolAllocator(
       std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
-      const std::size_t _minBytes = (1 << 8),
-      const float _min_usage_threshold = 0.5,
-      const std::size_t _usage_threshold_floor = 1024 * 1024 * 512
+      const std::size_t _minBytes = (1 << 8)
       )
     : blockAllocator(),
       usedBlocks(NULL),
@@ -199,8 +204,6 @@ public:
       totalBytes(0),
       allocBytes(0),
       minBytes(_minBytes),
-      minUsageThreshold(_min_usage_threshold),
-      usageThresholdFloor(_usage_threshold_floor),
       allocator(strat) { }
 
   ~DynamicPoolAllocator() { freeAllBlocks(); }
@@ -208,6 +211,7 @@ public:
   void *allocate(std::size_t size) {
     struct Block *best, *prev;
     findUsableBlock(best, prev, size);
+    std::stringstream ss;
 
     // Allocate a block if needed
     if (!best) allocateBlock(best, prev, size);
@@ -223,11 +227,15 @@ public:
     // Increment the allocated size
     allocBytes += size;
 
+    ss << "allocate(" << std::hex << size << ")";
+    dumpBlocks(ss);
     // Return the new pointer
     return usedBlocks->data;
   }
 
   void deallocate(void *ptr) {
+    std::stringstream ss;
+    //std::cout << __PRETTY_FUNCTION__ << " ptr= " << ptr << "\n";
     assert(ptr);
 
     // Find the associated block
@@ -242,18 +250,9 @@ public:
 
     // Release it
     releaseBlock(curr, prev);
-
-    std::size_t freeBytes = totalBytes - allocBytes;
-    double x = (double)freeBytes / (double)totalBytes;
-
-    if (totalBytes > usageThresholdFloor) {
-      UMPIRE_LOG(Debug, 
-          " " << freeBytes << "/" << totalBytes << "=" << x);
-    }
-
-    if (freeBytes > usageThresholdFloor && x > minUsageThreshold) {
-      freeReleasedBlocks();
-    }
+    ss << "deallocate(" << ptr << ")";
+    dumpBlocks(ss);
+    //std::cout << __PRETTY_FUNCTION__ << " RETURN\n";
   }
 
   std::size_t allocatedSize() const { return allocBytes; }
