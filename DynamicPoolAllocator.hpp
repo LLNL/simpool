@@ -12,7 +12,7 @@
 #include "umpire/strategy/AllocationStrategy.hpp"
 #include "umpire/util/Macros.hpp"
 
-#define MARTY_DEBUGGING
+#undef MARTY_DEBUGGING
 #ifdef MARTY_DEBUGGING
 #define MYDEBUG(msg)  {\
     std::stringstream _ss;\
@@ -255,6 +255,8 @@ protected:
       while (fb && fb_edata < orig_edata) {
         fbprev = fb;
         fb = fb->next;
+        if (fb)
+          fb_edata = fb->data + fb->size;
       }
 
       if ( fb && fb->data <= orig->data && fb_edata >= orig_edata ) {
@@ -262,8 +264,7 @@ protected:
 
         // Carve off lower fragment
         if (fb->data < orig->data) {
-          MYDEBUG(" STRANGENESS ");
-          assert(0);
+          //assert(0);
 
           struct Block* newBlock = (struct Block*)blockAllocator.allocate();
           UMPIRE_ASSERT("Failed to allocate split block during resource reclaim" && newBlock);
@@ -279,6 +280,7 @@ protected:
             freeBlocks = newBlock;
           fbprev = newBlock;
         }
+        //MYDEBUG(" FREE LIST SHOULD HAVE CHANGED ");
 
         // at this point, fb->data == orig->data.  Free back this portion
         UMPIRE_ASSERT("Pointer Manipulation Error" && (fb->data == orig->data));
@@ -288,6 +290,7 @@ protected:
         fb->data += orig->size;
 
         if ( fb->size == 0 ) {
+          MYDEBUG(" Free Bufsize Should be zero ");
           struct Block* tempBlock = fb->next;
           blockAllocator.deallocate(fb);
 
@@ -307,7 +310,7 @@ protected:
         struct Block* tempBlock = orig->next;
         blockAllocator.deallocate(orig);
         orig = tempBlock;
-        //MYDEBUG(" SHOULD HAVE FREED SOMETHING ");
+        MYDEBUG(" SHOULD HAVE FREED SOMETHING ");
       }
       else {
         orig_prev = orig;
