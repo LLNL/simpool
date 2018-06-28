@@ -51,6 +51,9 @@ protected:
   // Allocated size (bytes)
   std::size_t allocBytes;
 
+  // Minimum size of initial allocation
+  std::size_t minInitialBytes;
+
   // Minimum size for allocations
   std::size_t minBytes;
 
@@ -122,7 +125,13 @@ protected:
 
   // Allocate a new block and add it to the list of free blocks
   void allocateBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
-    const std::size_t sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
+    std::size_t sizeToAlloc;
+
+    if ( originalAllocations != NULL )
+      sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
+    else
+      sizeToAlloc = std::max(alignmentAdjust(size), minInitialBytes);
+
     curr = prev = NULL;
     void *data = NULL;
 
@@ -264,8 +273,6 @@ protected:
 
         // Carve off lower fragment
         if (fb->data < orig->data) {
-          //assert(0);
-
           struct Block* newBlock = (struct Block*)blockAllocator.allocate();
           UMPIRE_ASSERT("Failed to allocate split block during resource reclaim" && newBlock);
           newBlock->data = fb->data;
@@ -345,7 +352,8 @@ protected:
 public:
   DynamicPoolAllocator(
       std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
-      const std::size_t _minBytes = (1 << 8)
+      const std::size_t _minInitialBytes = (16 * 1024),
+      const std::size_t _minBytes = 256
       )
     : blockAllocator(),
       usedBlocks(NULL),
@@ -353,6 +361,7 @@ public:
       originalAllocations(NULL),
       totalBytes(0),
       allocBytes(0),
+      minInitialBytes(_minInitialBytes),
       minBytes(_minBytes),
       highestFreeBlockCount(0),
       allocator(strat) { }
