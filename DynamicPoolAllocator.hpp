@@ -12,17 +12,6 @@
 #include "umpire/strategy/AllocationStrategy.hpp"
 #include "umpire/util/Macros.hpp"
 
-#undef MARTY_DEBUGGING
-#ifdef MARTY_DEBUGGING
-#define MYDEBUG(msg)  {\
-    std::stringstream _ss;\
-    _ss << __PRETTY_FUNCTION__ << " " << __LINE__ << " " << msg;\
-    dumpBlocks(_ss);\
-}
-#else
-#define MYDEBUG(msg)
-#endif
-
 template <class IA = StdAllocator>
 class DynamicPoolAllocator
 {
@@ -61,50 +50,6 @@ protected:
 
   // Pointer to our allocator's allocation strategy
   std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
-
-  void dumpBlocks(const std::stringstream& header) {
-    if ( freeBlocks == NULL ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Free Blocks: EMPTY\n";
-    }
-    int i = 1;
-    for ( struct Block *iter = freeBlocks ; iter ; iter = iter->next ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Free Blocks: #" << i << " - " << std::hex << iter->size << ": " 
-        << (void*)(&iter->data[0]) << " -- " << (void*)(&iter->data[iter->size]) << "\n";
-      ++i;
-    }
-
-    if ( usedBlocks == NULL ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Used Blocks: EMPTY\n";
-    }
-    i = 1;
-    for ( struct Block *iter = usedBlocks ; iter ; iter = iter->next ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Used Blocks: #" << i << " - " << std::hex << iter->size << ": " 
-        << (void*)(&iter->data[0]) << " -- " << (void*)(&iter->data[iter->size]) << "\n";
-      ++i;
-    }
-
-    if ( originalAllocations == NULL ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Orig Blocks: EMPTY\n";
-    }
-    i = 1;
-    for ( struct Block *iter = originalAllocations ; iter ; iter = iter->next ) {
-      std::cerr 
-        << header.str()
-        << "\t" << " Orig Blocks: #" << i << " - " << std::hex << iter->size << ": " 
-        << (void*)(&iter->data[0]) << " -- " << (void*)(&iter->data[iter->size]) << "\n";
-      ++i;
-    }
-  }
 
   // Search the list of free blocks and return a usable one if that exists, else NULL
   void findUsableBlock(struct Block *&best, struct Block *&prev, std::size_t size) {
@@ -145,7 +90,6 @@ protected:
     }
 
     totalBytes += sizeToAlloc;
-    UMPIRE_ASSERT("Memory Allocation Failed" && data);
 
     // Allocate block for freeBlocks
     curr = (struct Block *) blockAllocator.allocate();
@@ -247,8 +191,6 @@ protected:
     else {
       curr->next = next;
     }
-
-    //MYDEBUG("RETURN");
   }
 
   void freeOriginalAllocationBlocks() {
@@ -256,7 +198,6 @@ protected:
     struct Block* fbprev = NULL;
     struct Block* orig_prev = NULL;
 
-    MYDEBUG("ENTER ");
     for ( struct Block* orig = originalAllocations ; orig && fb; ) {
       char* orig_edata = orig->data + orig->size;
       char* fb_edata = fb->data + fb->size;
@@ -287,7 +228,6 @@ protected:
             freeBlocks = newBlock;
           fbprev = newBlock;
         }
-        //MYDEBUG(" FREE LIST SHOULD HAVE CHANGED ");
 
         // at this point, fb->data == orig->data.  Free back this portion
         UMPIRE_ASSERT("Pointer Manipulation Error" && (fb->data == orig->data));
@@ -297,7 +237,6 @@ protected:
         fb->data += orig->size;
 
         if ( fb->size == 0 ) {
-          MYDEBUG(" Free Bufsize Should be zero ");
           struct Block* tempBlock = fb->next;
           blockAllocator.deallocate(fb);
 
@@ -317,15 +256,12 @@ protected:
         struct Block* tempBlock = orig->next;
         blockAllocator.deallocate(orig);
         orig = tempBlock;
-        MYDEBUG(" SHOULD HAVE FREED SOMETHING ");
       }
       else {
         orig_prev = orig;
         orig = orig->next;
       }
     }
-
-    MYDEBUG(" EXIT ");
   }
 
   void freeReleasedBlocks() {
