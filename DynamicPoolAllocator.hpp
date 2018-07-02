@@ -32,7 +32,7 @@ protected:
   struct Block *freeBlocks;
 
   // List of original allocations from resource sorted by starting address
-  struct Block *originalAllocations;
+  struct Block *allocations;
 
   // Total size allocated (bytes)
   std::size_t totalBytes;
@@ -72,7 +72,7 @@ protected:
   void allocateBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
     std::size_t sizeToAlloc;
 
-    if ( originalAllocations != NULL )
+    if ( allocations != NULL )
       sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
     else
       sizeToAlloc = std::max(alignmentAdjust(size), minInitialBytes);
@@ -98,7 +98,7 @@ protected:
     // Allocate block for original allocation
     struct Block *orig;
     orig = (struct Block *) blockAllocator.allocate();
-    assert("Failed to allocate block for originalAllocations List" && orig);
+    assert("Failed to allocate block for allocations List" && orig);
 
     // Find next and prev such that next->data is still smaller than data (keep ordered)
     struct Block *next;
@@ -114,7 +114,7 @@ protected:
 
     // Find next and prev such that next->data is still smaller than data (keep ordered)
     struct Block* orig_prev = NULL;
-    for ( next = originalAllocations; next && next->data < data; next = next->next ) {
+    for ( next = allocations; next && next->data < data; next = next->next ) {
       orig_prev = next;
     }
 
@@ -123,7 +123,7 @@ protected:
     orig->size = sizeToAlloc;
     orig->next = next;
     if (orig_prev) orig_prev->next = orig;
-    else originalAllocations = orig;
+    else allocations = orig;
   }
 
   void splitBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
@@ -198,7 +198,7 @@ protected:
     struct Block* fbprev = NULL;
     struct Block* orig_prev = NULL;
 
-    for ( struct Block* orig = originalAllocations ; orig && fb; ) {
+    for ( struct Block* orig = allocations ; orig && fb; ) {
       char* orig_edata = orig->data + orig->size;
       char* fb_edata = fb->data + fb->size;
 
@@ -251,7 +251,7 @@ protected:
         if ( orig_prev )
           orig_prev->next = orig->next;
         else
-          originalAllocations = orig->next;
+          allocations = orig->next;
 
         struct Block* tempBlock = orig->next;
         blockAllocator.deallocate(orig);
@@ -266,11 +266,11 @@ protected:
 
   void freeReleasedBlocks() {
     // Release the unused blocks
-    while(originalAllocations) {
-      allocator->deallocate(originalAllocations->data);
-      totalBytes -= originalAllocations->size;
-      struct Block *curr = originalAllocations;
-      originalAllocations = originalAllocations->next;
+    while(allocations) {
+      allocator->deallocate(allocations->data);
+      totalBytes -= allocations->size;
+      struct Block *curr = allocations;
+      allocations = allocations->next;
       blockAllocator.deallocate(curr);
     }
     freeBlocks = NULL;
@@ -294,7 +294,7 @@ public:
     : blockAllocator(),
       usedBlocks(NULL),
       freeBlocks(NULL),
-      originalAllocations(NULL),
+      allocations(NULL),
       totalBytes(0),
       allocBytes(0),
       minInitialBytes(_minInitialBytes),
@@ -361,9 +361,9 @@ public:
     return nb;
   }
 
-  std::size_t numOriginalAllocations() const {
+  std::size_t numAllocations() const {
     std::size_t nb = 0;
-    for (struct Block *temp = originalAllocations; temp; temp = temp->next) nb++;
+    for (struct Block *temp = allocations; temp; temp = temp->next) nb++;
     return nb;
   }
 };
