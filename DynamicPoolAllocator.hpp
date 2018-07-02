@@ -85,7 +85,7 @@ protected:
       data = allocator->allocate(sizeToAlloc);
     }
     catch (...) {
-      freeOriginalAllocationBlocks();
+      freeAllocationBlocks();
       data = allocator->allocate(sizeToAlloc);
     }
 
@@ -193,7 +193,7 @@ protected:
     }
   }
 
-  void freeOriginalAllocationBlocks() {
+  void freeAllocationBlocks() {
     struct Block* fb = freeBlocks;
     struct Block* fbprev = NULL;
     struct Block* orig_prev = NULL;
