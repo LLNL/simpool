@@ -270,27 +270,16 @@ protected:
 
   void freeReleasedBlocks() {
     // Release the unused blocks
-<<<<<<< HEAD:DynamicPoolAllocator.hpp
     while(allocations) {
       allocator->deallocate(allocations->data);
       totalBytes -= allocations->size;
       struct Block *curr = allocations;
       allocations = allocations->next;
-      blockAllocator.deallocate(curr);
-=======
-    while(freeBlocks) {
-      assert(freeBlocks->isHead);
-      MA::deallocate(freeBlocks->data);
-      totalBytes -= freeBlocks->size;
-      struct Block *curr = freeBlocks;
-      freeBlocks = freeBlocks->next;
       blockPool.deallocate(curr);
->>>>>>> upstream/master:DynamicSizePool.hpp
     }
     freeBlocks = NULL;
   }
 
-<<<<<<< HEAD:DynamicPoolAllocator.hpp
   void freeAllBlocks() {
     // Release the used blocks
     while(usedBlocks) {
@@ -301,22 +290,12 @@ protected:
   }
 
 public:
-  DynamicPoolAllocator(
+  DynamicSizePool(
       std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
       const std::size_t _minInitialBytes = (16 * 1024),
       const std::size_t _minBytes = 256
       )
     : blockAllocator(),
-=======
-public:
-  static inline DynamicSizePool &getInstance() {
-    static DynamicSizePool instance;
-    return instance;
-  }
-
-  DynamicSizePool(const std::size_t _minBytes = (1 << 8))
-    : blockPool(),
->>>>>>> upstream/master:DynamicSizePool.hpp
       usedBlocks(NULL),
       freeBlocks(NULL),
       allocations(NULL),
