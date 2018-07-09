@@ -1,6 +1,7 @@
 set (simpool_headers
-  DynamicPoolAllocator.hpp
-  FixedPoolAllocator.hpp
+  DynamiSizePool.hpp
+  FixedSizePool.hpp
+  FixedSizeAllocationStrategyPool.hpp
   StdAllocator.hpp)
 
 blt_add_library(
