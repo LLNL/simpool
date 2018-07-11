@@ -8,14 +8,12 @@
 #include <sstream>
 
 #include "umpire/tpl/simpool/StdAllocator.hpp"
-#include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
+#include "umpire/tpl/simpool/FixedSizePool.hpp"
+
 #include "umpire/strategy/AllocationStrategy.hpp"
 #include "umpire/util/Macros.hpp"
 
-#include "StdAllocator.hpp"
-#include "FixedSizePool.hpp"
-
-template <class MA, class IA = StdAllocator>
+template <class IA = StdAllocator>
 class DynamicSizePool
 {
 protected:
@@ -95,12 +93,12 @@ protected:
     totalBytes += sizeToAlloc;
 
     // Allocate block for freeBlocks
-    curr = (struct Block *) blockAllocator.allocate();
+    curr = (struct Block *) blockPool.allocate();
     assert("Failed to allocate block for freeBlock List" && curr);
 
     // Allocate block for original allocation
     struct Block *orig;
-    orig = (struct Block *) blockAllocator.allocate();
+    orig = (struct Block *) blockPool.allocate();
     assert("Failed to allocate block for allocations List" && orig);
 
     // Find next and prev such that next->data is still smaller than data (keep ordered)
@@ -218,7 +216,7 @@ protected:
 
         // Carve off lower fragment
         if (fb->data < orig->data) {
-          struct Block* newBlock = (struct Block*)blockAllocator.allocate();
+          struct Block* newBlock = (struct Block*)blockPool.allocate();
           UMPIRE_ASSERT("Failed to allocate split block during resource reclaim" && newBlock);
           newBlock->data = fb->data;
           newBlock->size = orig->data - fb->data;
@@ -242,7 +240,7 @@ protected:
 
         if ( fb->size == 0 ) {
           struct Block* tempBlock = fb->next;
-          blockAllocator.deallocate(fb);
+          blockPool.deallocate(fb);
 
           if ( fbprev ) 
             fbprev->next = tempBlock;
@@ -258,7 +256,7 @@ protected:
           allocations = orig->next;
 
         struct Block* tempBlock = orig->next;
-        blockAllocator.deallocate(orig);
+        blockPool.deallocate(orig);
         orig = tempBlock;
       }
       else {
@@ -295,7 +293,7 @@ public:
       const std::size_t _minInitialBytes = (16 * 1024),
       const std::size_t _minBytes = 256
       )
-    : blockAllocator(),
+    : blockPool(),
       usedBlocks(NULL),
       freeBlocks(NULL),
       allocations(NULL),
