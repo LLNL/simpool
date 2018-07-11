@@ -1,5 +1,5 @@
-#ifndef _DYNAMICPOOLALLOCATOR_HPP
-#define _DYNAMICPOOLALLOCATOR_HPP
+#ifndef _DYNAMICSIZEPOOL_HPP
+#define _DYNAMICSIZEPOOL_HPP
 
 #include <cstddef>
 #include <cassert>
@@ -8,12 +8,13 @@
 #include <sstream>
 
 #include "umpire/tpl/simpool/StdAllocator.hpp"
-#include "umpire/tpl/simpool/FixedPoolAllocator.hpp"
+#include "umpire/tpl/simpool/FixedSizePool.hpp"
+
 #include "umpire/strategy/AllocationStrategy.hpp"
 #include "umpire/util/Macros.hpp"
 
 template <class IA = StdAllocator>
-class DynamicPoolAllocator
+class DynamicSizePool
 {
 protected:
   struct Block
@@ -24,8 +25,8 @@ protected:
   };
 
   // Allocator for the underlying data
-  typedef FixedPoolAllocator<struct Block, IA, (1<<6)> BlockAlloc;
-  BlockAlloc blockAllocator;
+  typedef FixedSizePool<struct Block, IA, IA, (1<<6)> BlockPool;
+  BlockPool blockPool;
 
   // Start of the nodes of used and free block lists
   struct Block *usedBlocks;
@@ -92,12 +93,12 @@ protected:
     totalBytes += sizeToAlloc;
 
     // Allocate block for freeBlocks
-    curr = (struct Block *) blockAllocator.allocate();
+    curr = (struct Block *) blockPool.allocate();
     assert("Failed to allocate block for freeBlock List" && curr);
 
     // Allocate block for original allocation
     struct Block *orig;
-    orig = (struct Block *) blockAllocator.allocate();
+    orig = (struct Block *) blockPool.allocate();
     assert("Failed to allocate block for allocations List" && orig);
 
     // Find next and prev such that next->data is still smaller than data (keep ordered)
@@ -105,6 +106,7 @@ protected:
     for ( next = freeBlocks; next && next->data < data; next = next->next ) {
       prev = next;
     }
+
     // Insert
     curr->data = static_cast<char *>(data);
     curr->size = sizeToAlloc;
@@ -137,7 +139,7 @@ protected:
     else {
       // Split the block
       std::size_t remaining = curr->size - alignedsize;
-      struct Block *newBlock = (struct Block *) blockAllocator.allocate();
+      struct Block *newBlock = (struct Block *) blockPool.allocate();
       if (!newBlock) return;
       newBlock->data = curr->data + alignedsize;
       newBlock->size = remaining;
@@ -172,7 +174,7 @@ protected:
     // Check if prev and curr can be merged
     if ( prev && prev->data + prev->size == curr->data ) {
       prev->size = prev->size + curr->size;
-      blockAllocator.deallocate(curr); // keep data
+      blockPool.deallocate(curr); // keep data
       curr = prev;
     }
     else if (prev) {
@@ -186,7 +188,7 @@ protected:
     if ( next && curr->data + curr->size == next->data ) {
       curr->size = curr->size + next->size;
       curr->next = next->next;
-      blockAllocator.deallocate(next); // keep data
+      blockPool.deallocate(next); // keep data
     }
     else {
       curr->next = next;
@@ -214,7 +216,7 @@ protected:
 
         // Carve off lower fragment
         if (fb->data < orig->data) {
-          struct Block* newBlock = (struct Block*)blockAllocator.allocate();
+          struct Block* newBlock = (struct Block*)blockPool.allocate();
           UMPIRE_ASSERT("Failed to allocate split block during resource reclaim" && newBlock);
           newBlock->data = fb->data;
           newBlock->size = orig->data - fb->data;
@@ -238,7 +240,7 @@ protected:
 
         if ( fb->size == 0 ) {
           struct Block* tempBlock = fb->next;
-          blockAllocator.deallocate(fb);
+          blockPool.deallocate(fb);
 
           if ( fbprev ) 
             fbprev->next = tempBlock;
@@ -254,7 +256,7 @@ protected:
           allocations = orig->next;
 
         struct Block* tempBlock = orig->next;
-        blockAllocator.deallocate(orig);
+        blockPool.deallocate(orig);
         orig = tempBlock;
       }
       else {
@@ -271,7 +273,7 @@ protected:
       totalBytes -= allocations->size;
       struct Block *curr = allocations;
       allocations = allocations->next;
-      blockAllocator.deallocate(curr);
+      blockPool.deallocate(curr);
     }
     freeBlocks = NULL;
   }
@@ -286,12 +288,12 @@ protected:
   }
 
 public:
-  DynamicPoolAllocator(
+  DynamicSizePool(
       std::shared_ptr<umpire::strategy::AllocationStrategy> strat,
       const std::size_t _minInitialBytes = (16 * 1024),
       const std::size_t _minBytes = 256
       )
-    : blockAllocator(),
+    : blockPool(),
       usedBlocks(NULL),
       freeBlocks(NULL),
       allocations(NULL),
@@ -302,7 +304,7 @@ public:
       highestFreeBlockCount(0),
       allocator(strat) { }
 
-  ~DynamicPoolAllocator() { freeAllBlocks(); }
+  ~DynamicSizePool() { freeAllBlocks(); }
 
   void *allocate(std::size_t size) {
     struct Block *best, *prev;
@@ -346,7 +348,7 @@ public:
   std::size_t allocatedSize() const { return allocBytes; }
 
   std::size_t totalSize() const {
-    return totalBytes + blockAllocator.totalSize();
+    return totalBytes + blockPool.totalSize();
   }
 
   std::size_t numFreeBlocks() const {

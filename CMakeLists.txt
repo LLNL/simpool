@@ -1,6 +1,6 @@
 set (simpool_headers
-  DynamicPoolAllocator.hpp
-  FixedPoolAllocator.hpp
+  DynamicSizePool.hpp
+  FixedSizePool.hpp
   StdAllocator.hpp)
 
 blt_add_library(
@@ -16,3 +16,7 @@ install(TARGETS
   RUNTIME DESTINATION lib
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib)
+
+install(FILES
+  ${simpool_headers}
+  DESTINATION include/umpire/tpl/simpool)
