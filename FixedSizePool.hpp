@@ -33,7 +33,7 @@ protected:
 
     p->data  = reinterpret_cast<unsigned char*>(MA::allocate(numPerPool * sizeof(T)));
     p->avail = reinterpret_cast<unsigned int *>(p + 1);
-    for (int i = 0; i < NP; i++) p->avail[i] = -1;
+    for (int i = 0; i < NP; i++) p->avail[i] = (~0);
 
     *pnew = p;
   }
@@ -142,6 +142,5 @@ public:
   /// Return the pool size
   std::size_t poolSize() const { return totalPoolSize; }
 };
-
 
 #endif // _FIXEDSIZEPOOL_HPP
