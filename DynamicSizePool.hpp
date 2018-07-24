@@ -21,6 +21,7 @@ protected:
   {
     char *data;
     std::size_t size;
+    std::size_t blockSize;
     Block *next;
   };
 
@@ -31,9 +32,6 @@ protected:
   // Start of the nodes of used and free block lists
   struct Block *usedBlocks;
   struct Block *freeBlocks;
-
-  // List of original allocations from resource sorted by starting address
-  struct Block *allocations;
 
   // Total size allocated (bytes)
   std::size_t totalBytes;
@@ -46,8 +44,6 @@ protected:
 
   // Minimum size for allocations
   std::size_t minBytes;
-
-  std::size_t highestFreeBlockCount;
 
   // Pointer to our allocator's allocation strategy
   std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
@@ -73,10 +69,10 @@ protected:
   void allocateBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
     std::size_t sizeToAlloc;
 
-    if ( allocations != NULL )
-      sizeToAlloc = std::max(alignmentAdjust(size), minBytes);
+    if ( freeBlocks == NULL && usedBlocks == NULL )
+      sizeToAlloc = std::max(size, minInitialBytes);
     else
-      sizeToAlloc = std::max(alignmentAdjust(size), minInitialBytes);
+      sizeToAlloc = std::max(size, minBytes);
 
     curr = prev = NULL;
     void *data = NULL;
@@ -86,66 +82,50 @@ protected:
       data = allocator->allocate(sizeToAlloc);
     }
     catch (...) {
-      freeAllocationBlocks();
+      freeReleasedBlocks();
       data = allocator->allocate(sizeToAlloc);
     }
 
     totalBytes += sizeToAlloc;
 
-    // Allocate block for freeBlocks
+    // Allocate the block
     curr = (struct Block *) blockPool.allocate();
     assert("Failed to allocate block for freeBlock List" && curr);
 
-    // Allocate block for original allocation
-    struct Block *orig;
-    orig = (struct Block *) blockPool.allocate();
-    assert("Failed to allocate block for allocations List" && orig);
-
     // Find next and prev such that next->data is still smaller than data (keep ordered)
     struct Block *next;
-    for ( next = freeBlocks; next && next->data < data; next = next->next ) {
+    for ( next = freeBlocks; next && next->data < data; next = next->next )
       prev = next;
-    }
 
     // Insert
     curr->data = static_cast<char *>(data);
     curr->size = sizeToAlloc;
+    curr->blockSize = sizeToAlloc;
     curr->next = next;
-    if (prev) prev->next = curr;
-    else freeBlocks = curr;
-
-    // Find next and prev such that next->data is still smaller than data (keep ordered)
-    struct Block* orig_prev = NULL;
-    for ( next = allocations; next && next->data < data; next = next->next ) {
-      orig_prev = next;
-    }
 
     // Insert
-    orig->data = static_cast<char *>(data);
-    orig->size = sizeToAlloc;
-    orig->next = next;
-    if (orig_prev) orig_prev->next = orig;
-    else allocations = orig;
+    if (prev) prev->next = curr;
+    else freeBlocks = curr;
   }
 
   void splitBlock(struct Block *&curr, struct Block *&prev, const std::size_t size) {
     struct Block *next;
-    const std::size_t alignedsize = alignmentAdjust(size);
 
-    if ( curr->size == size || curr->size == alignedsize ) {
+    if ( curr->size == size ) {
       // Keep it
       next = curr->next;
     }
     else {
       // Split the block
-      std::size_t remaining = curr->size - alignedsize;
+      std::size_t remaining = curr->size - size;
       struct Block *newBlock = (struct Block *) blockPool.allocate();
       if (!newBlock) return;
-      newBlock->data = curr->data + alignedsize;
+      newBlock->data = curr->data + size;
       newBlock->size = remaining;
+      newBlock->blockSize = 0;
       newBlock->next = curr->next;
       next = newBlock;
-      curr->size = alignedsize;
+      curr->size = size;
     }
 
     if (prev) prev->next = next;
@@ -153,10 +133,6 @@ protected:
   }
 
   void releaseBlock(struct Block *curr, struct Block *prev) {
-#if 0
-    struct Block* loc_curr = curr;
-    size_t size = curr->size;
-#endif
     assert(curr != NULL);
 
     if (prev) prev->next = curr->next;
@@ -164,15 +140,14 @@ protected:
 
     // Find location to put this block in the freeBlocks list
     prev = NULL;
-    for ( struct Block *temp = freeBlocks ; temp && temp->data < curr->data ; temp = temp->next ) {
+    for ( struct Block *temp = freeBlocks ; temp && temp->data < curr->data ; temp = temp->next )
       prev = temp;
-    }
 
     // Keep track of the successor
     struct Block *next = prev ? prev->next : freeBlocks;
 
     // Check if prev and curr can be merged
-    if ( prev && prev->data + prev->size == curr->data ) {
+    if ( prev && prev->data + prev->size == curr->data && !curr->blockSize ) {
       prev->size = prev->size + curr->size;
       blockPool.deallocate(curr); // keep data
       curr = prev;
@@ -185,7 +160,7 @@ protected:
     }
 
     // Check if curr and next can be merged
-    if ( next && curr->data + curr->size == next->data ) {
+    if ( next && curr->data + curr->size == next->data && !next->blockSize ) {
       curr->size = curr->size + next->size;
       curr->next = next->next;
       blockPool.deallocate(next); // keep data
@@ -195,86 +170,27 @@ protected:
     }
   }
 
-  void freeAllocationBlocks() {
-    struct Block* fb = freeBlocks;
-    struct Block* fbprev = NULL;
-    struct Block* orig_prev = NULL;
-
-    for ( struct Block* orig = allocations ; orig && fb; ) {
-      char* orig_edata = orig->data + orig->size;
-      char* fb_edata = fb->data + fb->size;
-
-      while (fb && fb_edata < orig_edata) {
-        fbprev = fb;
-        fb = fb->next;
-        if (fb)
-          fb_edata = fb->data + fb->size;
-      }
-
-      if ( fb && fb->data <= orig->data && fb_edata >= orig_edata ) {
-        // We found something we can free, now we need to carve it out of the free list
-
-        // Carve off lower fragment
-        if (fb->data < orig->data) {
-          struct Block* newBlock = (struct Block*)blockPool.allocate();
-          UMPIRE_ASSERT("Failed to allocate split block during resource reclaim" && newBlock);
-          newBlock->data = fb->data;
-          newBlock->size = orig->data - fb->data;
-          newBlock->next = fb;
-          fb->data = orig->data;
-          fb->size -= newBlock->size;
-
-          if ( fbprev ) 
-            fbprev->next = newBlock;
-          else
-            freeBlocks = newBlock;
-          fbprev = newBlock;
-        }
-
-        // at this point, fb->data == orig->data.  Free back this portion
-        UMPIRE_ASSERT("Pointer Manipulation Error" && (fb->data == orig->data));
-        allocator->deallocate(orig->data);
-        totalBytes -= orig->size;
-        fb->size -= orig->size;
-        fb->data += orig->size;
-
-        if ( fb->size == 0 ) {
-          struct Block* tempBlock = fb->next;
-          blockPool.deallocate(fb);
-
-          if ( fbprev ) 
-            fbprev->next = tempBlock;
-          else
-            freeBlocks = tempBlock;
-          fb = tempBlock;
-        }
-        // Resume at beggining of upper fragment
-
-        if ( orig_prev )
-          orig_prev->next = orig->next;
-        else
-          allocations = orig->next;
-
-        struct Block* tempBlock = orig->next;
-        blockPool.deallocate(orig);
-        orig = tempBlock;
-      }
-      else {
-        orig_prev = orig;
-        orig = orig->next;
-      }
-    }
-  }
-
   void freeReleasedBlocks() {
     // Release the unused blocks
-    while(allocations) {
-      allocator->deallocate(allocations->data);
-      totalBytes -= allocations->size;
-      struct Block *curr = allocations;
-      allocations = allocations->next;
-      blockPool.deallocate(curr);
+    struct Block *temp = freeBlocks;
+    struct Block *prev = NULL;
+
+    while ( temp ) {
+      struct Block *next = temp->next;
+      if ( temp->size == temp->blockSize ) {
+        totalBytes -= temp->blockSize;
+        allocator->deallocate(temp->data);
+        if ( prev ) {
+          prev->next = temp->next;
+        }
+        blockPool.deallocate(temp);
+      }
+      else {
+        prev = temp;
+      }
+      temp = next;
     }
+
     freeBlocks = NULL;
   }
 
@@ -285,6 +201,7 @@ protected:
     }
 
     freeReleasedBlocks();
+    assert( "Not all blocks were released properly" && freeBlocks == NULL );
   }
 
 public:
@@ -296,18 +213,17 @@ public:
     : blockPool(),
       usedBlocks(NULL),
       freeBlocks(NULL),
-      allocations(NULL),
       totalBytes(0),
       allocBytes(0),
       minInitialBytes(_minInitialBytes),
       minBytes(_minBytes),
-      highestFreeBlockCount(0),
       allocator(strat) { }
 
   ~DynamicSizePool() { freeAllBlocks(); }
 
   void *allocate(std::size_t size) {
     struct Block *best, *prev;
+    size = alignmentAdjust(size);
     findUsableBlock(best, prev, size);
 
     // Allocate a block if needed
@@ -360,12 +276,6 @@ public:
   std::size_t numUsedBlocks() const {
     std::size_t nb = 0;
     for (struct Block *temp = usedBlocks; temp; temp = temp->next) nb++;
-    return nb;
-  }
-
-  std::size_t numAllocations() const {
-    std::size_t nb = 0;
-    for (struct Block *temp = allocations; temp; temp = temp->next) nb++;
     return nb;
   }
 };
