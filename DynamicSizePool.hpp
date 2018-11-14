@@ -45,6 +45,9 @@ protected:
   // Minimum size for allocations
   std::size_t minBytes;
 
+  // High water mark of allocations
+  std::size_t highWaterMark;
+
   // Pointer to our allocator's allocation strategy
   std::shared_ptr<umpire::strategy::AllocationStrategy> allocator;
 
@@ -55,6 +58,8 @@ protected:
       if ( iter->size >= size && (!best || iter->size < best->size) ) {
         best = iter;
         prev = iterPrev;
+        if ( iter->size == size )
+          break;    // Exact match, won't find a better one, look no further
       }
       iterPrev = iter;
     }
@@ -82,8 +87,38 @@ protected:
       data = allocator->allocate(sizeToAlloc);
     }
     catch (...) {
-      freeReleasedBlocks();
-      data = allocator->allocate(sizeToAlloc);
+      UMPIRE_LOG(Error, 
+          "\n\tMemory exhausted at allocation resource. "
+          "Attempting to give blocks back.\n\t"
+          << allocatedSize() << " Allocated to pool, "
+          << numFreeBlocks() << " Free Blocks, "
+          << numUsedBlocks() << " Used Blocks\n"
+      );
+      std::size_t bytesFreed = freeReleasedBlocks();
+      UMPIRE_LOG(Error, 
+          "\n\tMemory exhausted at allocation resource.  "
+          "Able to give " << bytesFreed << " bytes back to recource\n"
+          "\tRetrying allocation operation: "
+          << allocatedSize() << " Bytes still allocated to pool, "
+          << numFreeBlocks() << " Partially Free Blocks, "
+          << numUsedBlocks() << " Used Blocks\n"
+      );
+      try {
+        data = allocator->allocate(sizeToAlloc);
+        UMPIRE_LOG(Error, 
+          "\n\tMemory successfully recovered at resource.  Allocation succeeded\n"
+        );
+      }
+      catch (...) {
+        UMPIRE_LOG(Error, 
+          "\n\tUnable to allocate from resource even after giving back free blocks.\n"
+          "\tThrowing to let application know we have no more memory: "
+          << allocatedSize() << " Bytes still allocated to pool\n"
+          << numFreeBlocks() << " Partially Free Blocks, "
+          << numUsedBlocks() << " Used Blocks\n"
+        );
+        throw;
+      }
     }
 
     totalBytes += sizeToAlloc;
@@ -170,28 +205,39 @@ protected:
     }
   }
 
-  void freeReleasedBlocks() {
+  std::size_t freeReleasedBlocks() {
     // Release the unused blocks
-    struct Block *temp = freeBlocks;
+    struct Block *curr = freeBlocks;
     struct Block *prev = NULL;
+    std::size_t byteCount = totalBytes;
 
-    while ( temp ) {
-      struct Block *next = temp->next;
-      if ( temp->size == temp->blockSize ) {
-        totalBytes -= temp->blockSize;
-        allocator->deallocate(temp->data);
-        if ( prev ) {
-          prev->next = temp->next;
-        }
-        blockPool.deallocate(temp);
+    while ( curr ) {
+      struct Block *next = curr->next;
+      // The free block list may contain partially released released blocks.
+      // Make sure to only free blocks that are completely released.
+      //
+      if ( curr->size == curr->blockSize ) {
+        totalBytes -= curr->blockSize;
+        allocator->deallocate(curr->data);
+
+        if ( prev )   prev->next = curr->next;
+        else          freeBlocks = curr->next;
+
+        blockPool.deallocate(curr);
       }
       else {
-        prev = temp;
+        prev = curr;
       }
-      temp = next;
+      curr = next;
     }
 
-    freeBlocks = NULL;
+    return(byteCount - totalBytes);
+  }
+
+  void coalesceFreeBlock(std::size_t size) {
+    freeReleasedBlocks();
+    void* ptr = allocate(size);
+    deallocate(ptr);
   }
 
   void freeAllBlocks() {
@@ -217,6 +263,7 @@ public:
       allocBytes(0),
       minInitialBytes(_minInitialBytes),
       minBytes(_minBytes),
+      highWaterMark(0),
       allocator(strat) { }
 
   ~DynamicSizePool() { freeAllBlocks(); }
@@ -240,6 +287,9 @@ public:
     // Increment the allocated size
     allocBytes += size;
 
+    if ( allocBytes > highWaterMark )
+      highWaterMark = allocBytes;
+
     // Return the new pointer
     return usedBlocks->data;
   }
@@ -259,6 +309,16 @@ public:
 
     // Release it
     releaseBlock(curr, prev);
+
+    if ( allocBytes == 0 ) {
+      if ( numFreeBlocks() > 1 ) {
+        UMPIRE_LOG(Debug, "Byte allocations for allocator " << this
+                          << " went to 0. Coalescing "
+                          << highWaterMark << " bytes from "
+                          << numFreeBlocks() << " free blocks\n");
+        coalesceFreeBlock(highWaterMark);
+      }
+    }
   }
 
   std::size_t allocatedSize() const { return allocBytes; }
