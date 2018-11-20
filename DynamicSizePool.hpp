@@ -94,11 +94,10 @@ protected:
           << numFreeBlocks() << " Free Blocks, "
           << numUsedBlocks() << " Used Blocks\n"
       );
-      std::size_t bytesFreed = freeReleasedBlocks();
+      freeReleasedBlocks();
       UMPIRE_LOG(Error, 
           "\n\tMemory exhausted at allocation resource.  "
-          "Able to give " << bytesFreed << " bytes back to recource\n"
-          "\tRetrying allocation operation: "
+          "\n\tRetrying allocation operation: "
           << allocatedSize() << " Bytes still allocated to pool, "
           << numFreeBlocks() << " Partially Free Blocks, "
           << numUsedBlocks() << " Used Blocks\n"
@@ -205,11 +204,10 @@ protected:
     }
   }
 
-  std::size_t freeReleasedBlocks() {
+  void freeReleasedBlocks() {
     // Release the unused blocks
     struct Block *curr = freeBlocks;
     struct Block *prev = NULL;
-    std::size_t byteCount = totalBytes;
 
     while ( curr ) {
       struct Block *next = curr->next;
@@ -230,8 +228,6 @@ protected:
       }
       curr = next;
     }
-
-    return(byteCount - totalBytes);
   }
 
   void coalesceFreeBlock(std::size_t size) {
