@@ -350,6 +350,11 @@ public:
     coalesceFreeBlock(size_to_coalesce);
 
   }
+
+  void release()
+  {
+    freeReleasedBlocks();
+  }
 };
 
 #endif
