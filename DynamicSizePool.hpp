@@ -204,10 +204,12 @@ protected:
     }
   }
 
-  void freeReleasedBlocks() {
+  std::size_t freeReleasedBlocks() {
     // Release the unused blocks
     struct Block *curr = freeBlocks;
     struct Block *prev = NULL;
+
+    std::size_t freed = 0;
 
     while ( curr ) {
       struct Block *next = curr->next;
@@ -216,6 +218,7 @@ protected:
       //
       if ( curr->size == curr->blockSize ) {
         totalBytes -= curr->blockSize;
+        freed += curr->blockSize;
         allocator->deallocate(curr->data);
 
         if ( prev )   prev->next = curr->next;
@@ -228,6 +231,8 @@ protected:
       }
       curr = next;
     }
+
+    return freed;
   }
 
   void coalesceFreeBlock(std::size_t size) {
@@ -333,6 +338,17 @@ public:
     std::size_t nb = 0;
     for (struct Block *temp = usedBlocks; temp; temp = temp->next) nb++;
     return nb;
+  }
+
+  void coalesce()
+  {
+    std::size_t size_to_coalesce = freeReleasedBlocks();
+
+    UMPIRE_LOG(Debug, "Attempting to coalesce "
+                      << size_to_coalesce << " bytes");
+
+    coalesceFreeBlock(size_to_coalesce);
+
   }
 };
 
