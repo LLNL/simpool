@@ -235,7 +235,11 @@ protected:
     return freed;
   }
 
-  void coalesceFreeBlock(std::size_t size) {
+  void coalesceFreeBlocks(std::size_t size) {
+    UMPIRE_LOG(Debug, "Allocator " << this
+                        << " coalescing to "
+                        << size << " bytes from "
+                        << numFreeBlocks() << " free blocks\n");
     freeReleasedBlocks();
     void* ptr = allocate(size);
     deallocate(ptr);
@@ -311,15 +315,8 @@ public:
     // Release it
     releaseBlock(curr, prev);
 
-    if ( allocBytes == 0 ) {
-      if ( numFreeBlocks() > 1 ) {
-        UMPIRE_LOG(Debug, "Byte allocations for allocator " << this
-                          << " went to 0. Coalescing "
-                          << highWaterMark << " bytes from "
-                          << numFreeBlocks() << " free blocks\n");
-        coalesceFreeBlock(highWaterMark);
-      }
-    }
+    if ( allocBytes == 0 && numFreeBlocks() > 1 )
+      coalesceFreeBlocks(highWaterMark);
   }
 
   std::size_t allocatedSize() const { return allocBytes; }
@@ -340,15 +337,15 @@ public:
     return nb;
   }
 
-  void coalesce()
-  {
-    std::size_t size_to_coalesce = freeReleasedBlocks();
+  void coalesce() {
+    if ( numFreeBlocks() > 1 ) {
+      std::size_t size_to_coalesce = freeReleasedBlocks();
 
-    UMPIRE_LOG(Debug, "Attempting to coalesce "
+      UMPIRE_LOG(Debug, "Attempting to coalesce "
                       << size_to_coalesce << " bytes");
 
-    coalesceFreeBlock(size_to_coalesce);
-
+      coalesceFreeBlocks(size_to_coalesce);
+    }
   }
 
   void release()
